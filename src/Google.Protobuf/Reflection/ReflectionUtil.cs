@@ -30,6 +30,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endregion
 
+#if !NOEMIT
 using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
@@ -102,6 +103,117 @@ namespace Google.Protobuf.Reflection
             Expression castTarget = Expression.Convert(targetParameter, method.DeclaringType);
             Expression call = Expression.Call(castTarget, method);
             return Expression.Lambda<Action<IMessage>>(call, targetParameter).Compile();
-        }        
+        }
     }
 }
+
+#else
+
+using System;
+using System.Reflection;
+
+namespace Google.Protobuf.Reflection
+{
+    /// <summary>
+    /// The methods in this class are somewhat evil, and should not be tampered with lightly.
+    /// Basically they allow the creation of relatively weakly typed delegates from MethodInfos
+    /// which are more strongly typed. They do this by creating an appropriate strongly typed
+    /// delegate from the MethodInfo, and then calling that within an anonymous method.
+    /// Mind-bending stuff (at least to your humble narrator) but the resulting delegates are
+    /// very fast compared with calling Invoke later on.
+    /// </summary>
+    internal static class ReflectionUtil
+    {
+        /// <summary>
+        /// Empty Type[] used when calling GetProperty to force property instead of indexer fetching.
+        /// </summary>
+        internal static readonly Type[] EmptyTypes = new Type[0];
+
+        static ReflectionUtil()
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+
+            var classType = typeof(ReflectionUtil);
+
+            CreateActionIMessageHelperInfo = classType.GetMethod("CreateActionIMessageHelper", flags);
+            CreateActionIMessageObjectHelperInfo = classType.GetMethod("CreateActionIMessageObjectHelper", flags);
+            CreateFuncIMessageTHelperInfo = classType.GetMethod("CreateFuncIMessageTHelper", flags);
+            CreateFuncIMessageObjectHelperInfo = classType.GetMethod("CreateFuncIMessageObjectHelper", flags);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will cast the argument to the appropriate method target type,
+        /// call the method on it, then convert the result to object.
+        /// </summary>
+        internal static Func<IMessage, object> CreateFuncIMessageObject(MethodInfo method)
+        {
+            var typedMethod = CreateFuncIMessageObjectHelperInfo.MakeGenericMethod(method.DeclaringType, method.ReturnType);
+            return (Func<IMessage, object>) typedMethod.Invoke(null, new object[] { method });
+        }
+
+        private static readonly MethodInfo CreateFuncIMessageObjectHelperInfo;
+        private static Func<IMessage, object> CreateFuncIMessageObjectHelper<TMessage, TResult>(MethodInfo method)
+            where TMessage : IMessage
+        {
+            var func = (Func<TMessage, TResult>) Delegate.CreateDelegate(typeof(Func<TMessage, TResult>), method);
+            return message => func((TMessage) message);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will cast the argument to the appropriate method target type,
+        /// call the method on it, then convert the result to the specified type.
+        /// </summary>
+        internal static Func<IMessage, T> CreateFuncIMessageT<T>(MethodInfo method)
+        {
+            var typedMethod = CreateFuncIMessageTHelperInfo.MakeGenericMethod(method.DeclaringType, method.ReturnType, typeof(T));
+            return (Func<IMessage, T>) typedMethod.Invoke(null, new object[] { method });
+        }
+
+        private static readonly MethodInfo CreateFuncIMessageTHelperInfo;
+        private static Func<IMessage, T> CreateFuncIMessageTHelper<TMessage, TResult, T>(MethodInfo method)
+            where TMessage : IMessage
+        {
+            var func = (Func<TMessage, TResult>) Delegate.CreateDelegate(typeof(Func<TMessage, TResult>), method);
+            return message => (T) (object) func((TMessage) message);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will execute the given method after casting the first argument to
+        /// the target type of the method, and the second argument to the first parameter type of the method.
+        /// </summary>
+        internal static Action<IMessage, object> CreateActionIMessageObject(MethodInfo method)
+        {
+            var parameterType = method.GetParameters()[0].ParameterType;
+            var typedMethod = CreateActionIMessageObjectHelperInfo.MakeGenericMethod(method.DeclaringType, parameterType);
+            return (Action<IMessage, object>) typedMethod.Invoke(null, new object[] { method });
+        }
+
+        private static readonly MethodInfo CreateActionIMessageObjectHelperInfo;
+        private static Action<IMessage, object> CreateActionIMessageObjectHelper<TMessage, TArgument>(MethodInfo method)
+            where TMessage : IMessage
+        {
+            var action = (Action<TMessage, TArgument>) Delegate.CreateDelegate(typeof(Action<TMessage, TArgument>), method);
+            return (message, param) => action((TMessage) message, (TArgument) param);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will execute the given method after casting the first argument to
+        /// the target type of the method.
+        /// </summary>
+        internal static Action<IMessage> CreateActionIMessage(MethodInfo method)
+        {
+            var typedMethod = CreateActionIMessageHelperInfo.MakeGenericMethod(method.DeclaringType);
+            return (Action<IMessage>) typedMethod.Invoke(null, new object[] { method });
+        }
+
+        private static readonly MethodInfo CreateActionIMessageHelperInfo;
+        private static Action<IMessage> CreateActionIMessageHelper<TMessage>(MethodInfo method)
+            where TMessage : IMessage
+        {
+            var action = (Action<TMessage>) Delegate.CreateDelegate(typeof(Action<TMessage>), method);
+            return message => action((TMessage) message);
+        }
+    }
+}
+
+#endif

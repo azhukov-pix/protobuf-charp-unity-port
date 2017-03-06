@@ -107,6 +107,66 @@ namespace Google.Protobuf.Reflection
     }
 }
 
+#elif AOT
+
+using System;
+using System.Reflection;
+
+namespace Google.Protobuf.Reflection
+{
+    /// <summary>
+    /// The methods in this class are somewhat evil, and should not be tampered with lightly.
+    /// Basically they allow the creation of relatively weakly typed delegates from MethodInfos
+    /// which are more strongly typed. They do this by creating an appropriate strongly typed
+    /// delegate from the MethodInfo, and then calling that within an anonymous method.
+    /// Mind-bending stuff (at least to your humble narrator) but the resulting delegates are
+    /// very fast compared with calling Invoke later on.
+    /// </summary>
+    internal static class ReflectionUtil
+    {
+        /// <summary>
+        /// Empty Type[] used when calling GetProperty to force property instead of indexer fetching.
+        /// </summary>
+        internal static readonly Type[] EmptyTypes = new Type[0];
+
+        /// <summary>
+        /// Creates a delegate which will cast the argument to the appropriate method target type,
+        /// call the method on it, then convert the result to object.
+        /// </summary>
+        internal static Func<IMessage, object> CreateFuncIMessageObject(MethodInfo method)
+        {
+            return message => method.Invoke(message, null);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will cast the argument to the appropriate method target type,
+        /// call the method on it, then convert the result to the specified type.
+        /// </summary>
+        internal static Func<IMessage, T> CreateFuncIMessageT<T>(MethodInfo method)
+        {
+            return message => (T) method.Invoke(message, null);
+        }
+
+        /// <summary>
+        /// Creates a delegate which will execute the given method after casting the first argument to
+        /// the target type of the method, and the second argument to the first parameter type of the method.
+        /// </summary>
+        internal static Action<IMessage, object> CreateActionIMessageObject(MethodInfo method)
+        {
+            return (message, param) => method.Invoke(message, new [] { param });
+        }
+
+        /// <summary>
+        /// Creates a delegate which will execute the given method after casting the first argument to
+        /// the target type of the method.
+        /// </summary>
+        internal static Action<IMessage> CreateActionIMessage(MethodInfo method)
+        {
+            return message => method.Invoke(message, null);
+        }
+    }
+}
+
 #else
 
 using System;

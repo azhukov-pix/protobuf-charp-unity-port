@@ -45,7 +45,7 @@
     },
     "net35": {
         "buildOptions": {
-            "define": [ "NOEMIT" ]
+            "define": [ "NOEMIT", "AOT" ]
         }
     },
     "netstandard1.0": {
